@@ -1,0 +1,143 @@
+version: '3'
+
+services:
+  # Zookeeper service for Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+    networks:
+      - stock-pipeline
+
+  # Kafka broker
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - stock-pipeline
+
+  # Kafka UI for monitoring
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - stock-pipeline
+
+  # Finnhub data collector
+  data-collector:
+    build: ./data-collector
+    container_name: data-collector
+    depends_on:
+      - kafka
+    environment:
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      STOCK_SYMBOLS: ${STOCK_SYMBOLS:-AAPL,MSFT,GOOGL,AMZN,META}
+    restart: unless-stopped
+    networks:
+      - stock-pipeline
+
+  # Spark master node
+  spark-master:
+    image: bitnami/spark:3.3.2
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    ports:
+      - "8001:8080"
+      - "7077:7077"
+    networks:
+      - stock-pipeline
+
+  # Spark worker node
+  spark-worker:
+    image: bitnami/spark:3.3.2
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    networks:
+      - stock-pipeline
+
+  # Spark processing job
+  spark-processor:
+    build: ./spark
+    container_name: spark-processor
+    depends_on:
+      - spark-master
+      - kafka
+    environment:
+      SPARK_MASTER: spark://spark-master:7077
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/service-account.json
+      BIGQUERY_PROJECT: ${BIGQUERY_PROJECT}
+      BIGQUERY_DATASET: ${BIGQUERY_DATASET}
+    volumes:
+      - ./credentials:/app/credentials
+      - ./spark/checkpoint:/checkpoint
+    networks:
+      - stock-pipeline
+
+  # Dashboard application
+  dashboard:
+    build: ./dashboard
+    container_name: dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/service-account.json
+      BIGQUERY_PROJECT: ${BIGQUERY_PROJECT}
+      BIGQUERY_DATASET: ${BIGQUERY_DATASET}
+    volumes:
+      - ./credentials:/app/credentials
+    networks:
+      - stock-pipeline
+
+networks:
+  stock-pipeline:
+    driver: bridge
+
+volumes:
+  zookeeper-data:
+  kafka-data:

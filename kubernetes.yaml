@@ -1,0 +1,248 @@
+# Complete Kubernetes deployment file
+# This can be used instead of individual k8s/*.yaml files
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: stock-pipeline
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: spark-checkpoint-pvc
+  namespace: stock-pipeline
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: stock-pipeline
+spec:
+  serviceName: "kafka-headless"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+      - name: kafka
+        image: confluentinc/cp-kafka:7.3.0
+        ports:
+        - containerPort: 9092
+          name: kafka
+        env:
+        - name: KAFKA_BROKER_ID
+          value: "1"
+        - name: KAFKA_ZOOKEEPER_CONNECT
+          value: "zookeeper:2181"
+        - name: KAFKA_ADVERTISED_LISTENERS
+          value: "PLAINTEXT://kafka-headless:9092"
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: "1"
+        volumeMounts:
+        - name: kafka-data
+          mountPath: /var/lib/kafka/data
+  volumeClaimTemplates:
+  - metadata:
+      name: kafka-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: stock-pipeline
+spec:
+  selector:
+    app: kafka
+  ports:
+  - port: 9092
+    targetPort: 9092
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: stock-pipeline
+spec:
+  serviceName: "zookeeper-headless"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      containers:
+      - name: zookeeper
+        image: confluentinc/cp-zookeeper:7.3.0
+        ports:
+        - containerPort: 2181
+          name: client
+        env:
+        - name: ZOOKEEPER_CLIENT_PORT
+          value: "2181"
+        - name: ZOOKEEPER_TICK_TIME
+          value: "2000"
+        volumeMounts:
+        - name: zookeeper-data
+          mountPath: /var/lib/zookeeper/data
+  volumeClaimTemplates:
+  - metadata:
+      name: zookeeper-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: stock-pipeline
+spec:
+  selector:
+    app: zookeeper
+  ports:
+  - port: 2181
+    targetPort: 2181
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-collector
+  namespace: stock-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-collector
+  template:
+    metadata:
+      labels:
+        app: data-collector
+    spec:
+      containers:
+      - name: data-collector
+        image: ${DOCKER_REGISTRY}/stock-market-data-collector:latest
+        env:
+        - name: FINNHUB_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: finnhub-credentials
+              key: api-key
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-headless:9092"
+        - name: STOCK_SYMBOLS
+          value: "AAPL,MSFT,GOOGL,AMZN,META"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-processor
+  namespace: stock-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-processor
+  template:
+    metadata:
+      labels:
+        app: spark-processor
+    spec:
+      containers:
+      - name: spark-processor
+        image: ${DOCKER_REGISTRY}/stock-market-spark-processor:latest
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-headless:9092"
+        - name: CHECKPOINT_LOCATION
+          value: "/checkpoint"
+        - name: BIGQUERY_PROJECT
+          valueFrom:
+            secretKeyRef:
+              name: gcp-credentials
+              key: project-id
+        - name: BIGQUERY_DATASET
+          value: "stock_data"
+        volumeMounts:
+        - name: google-cloud-key
+          mountPath: /app/credentials
+          readOnly: true
+        - name: checkpoint-volume
+          mountPath: /checkpoint
+      volumes:
+      - name: google-cloud-key
+        secret:
+          secretName: gcp-credentials
+      - name: checkpoint-volume
+        persistentVolumeClaim:
+          claimName: spark-checkpoint-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: stock-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dashboard
+  template:
+    metadata:
+      labels:
+        app: dashboard
+    spec:
+      containers:
+      - name: dashboard
+        image: ${DOCKER_REGISTRY}/stock-market-dashboard:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: BIGQUERY_PROJECT
+          valueFrom:
+            secretKeyRef:
+              name: gcp-credentials
+              key: project-id
+        - name: BIGQUERY_DATASET
+          value: "stock_data"
+        volumeMounts:
+        - name: google-cloud-key
+          mountPath: /app/credentials
+          readOnly: true
+      volumes:
+      - name: google-cloud-key
+        secret:
+          secretName: gcp-credentials
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: stock-pipeline
+spec:
+  selector:
+    app: dashboard
+  ports:
+  - port: 80
+    targetPort: 3000
+  type: LoadBalancer

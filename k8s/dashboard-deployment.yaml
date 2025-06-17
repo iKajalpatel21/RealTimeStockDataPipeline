@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  labels:
+    app: dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dashboard
+  template:
+    metadata:
+      labels:
+        app: dashboard
+    spec:
+      containers:
+      - name: dashboard
+        image: ${DOCKER_REGISTRY}/stock-market-dashboard:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: BIGQUERY_PROJECT
+          valueFrom:
+            secretKeyRef:
+              name: gcp-credentials
+              key: project-id
+        - name: BIGQUERY_DATASET
+          value: "stock_data"
+        volumeMounts:
+        - name: google-cloud-key
+          mountPath: /app/credentials
+          readOnly: true
+        resources:
+          limits:
+            cpu: "0.5"
+            memory: "512Mi"
+          requests:
+            cpu: "0.2"
+            memory: "256Mi"
+      volumes:
+      - name: google-cloud-key
+        secret:
+          secretName: gcp-credentials
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+spec:
+  selector:
+    app: dashboard
+  ports:
+  - port: 80
+    targetPort: 3000
+  type: LoadBalancer

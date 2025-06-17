@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-processor
+  labels:
+    app: spark-processor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-processor
+  template:
+    metadata:
+      labels:
+        app: spark-processor
+    spec:
+      containers:
+      - name: spark-processor
+        image: ${DOCKER_REGISTRY}/stock-market-spark-processor:latest
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-headless:9092"
+        - name: CHECKPOINT_LOCATION
+          value: "/checkpoint"
+        - name: BIGQUERY_PROJECT
+          valueFrom:
+            secretKeyRef:
+              name: gcp-credentials
+              key: project-id
+        - name: BIGQUERY_DATASET
+          value: "stock_data"
+        volumeMounts:
+        - name: google-cloud-key
+          mountPath: /app/credentials
+          readOnly: true
+        - name: checkpoint-volume
+          mountPath: /checkpoint
+        resources:
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+      volumes:
+      - name: google-cloud-key
+        secret:
+          secretName: gcp-credentials
+      - name: checkpoint-volume
+        persistentVolumeClaim:
+          claimName: spark-checkpoint-pvc

@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-collector
+  labels:
+    app: data-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-collector
+  template:
+    metadata:
+      labels:
+        app: data-collector
+    spec:
+      containers:
+      - name: data-collector
+        image: ${DOCKER_REGISTRY}/stock-market-data-collector:latest
+        env:
+        - name: FINNHUB_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: finnhub-credentials
+              key: api-key
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-headless:9092"
+        - name: STOCK_SYMBOLS
+          value: "AAPL,MSFT,GOOGL,AMZN,META"
+        resources:
+          limits:
+            cpu: "0.5"
+            memory: "512Mi"
+          requests:
+            cpu: "0.2"
+            memory: "256Mi"
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import os; exit(0 if os.path.exists('/tmp/healthy') else 1)"
+          initialDelaySeconds: 30
+          periodSeconds: 30
