@@ -18,6 +18,9 @@ This project implements a complete data pipeline for processing real-time stock 
 - `/k8s`: Kubernetes manifests for deployment
 - `/.github`: GitHub Actions workflows for CI/CD
 
+## Project Architecture
+![image](https://github.com/user-attachments/assets/fc2bd8ed-2cdd-4cf0-80e7-dd7e758dffc8)
+
 ## Setup Instructions
 
 1. Set up environment variables in `.env` file
