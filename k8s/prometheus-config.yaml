@@ -1,0 +1,240 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: 'payment-processing'
+        environment: 'production'
+    
+    alerting:
+      alertmanagers:
+      - static_configs:
+        - targets:
+          - alertmanager:9093
+    
+    rule_files:
+    - '/etc/prometheus/rules/*.yml'
+    
+    scrape_configs:
+    # Prometheus self-monitoring
+    - job_name: 'prometheus'
+      static_configs:
+      - targets: ['localhost:9090']
+    
+    # Kubernetes metrics
+    - job_name: 'kubernetes-apiservers'
+      kubernetes_sd_configs:
+      - role: endpoints
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: default;kubernetes;https
+    
+    # Kubernetes nodes
+    - job_name: 'kubernetes-nodes'
+      kubernetes_sd_configs:
+      - role: node
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+    
+    # Kafka metrics
+    - job_name: 'kafka'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - payment-processing
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: kafka
+      - source_labels: [__meta_kubernetes_pod_container_port_number]
+        action: keep
+        regex: '9308'
+    
+    # Spark metrics
+    - job_name: 'spark-processor'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - payment-processing
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: spark-processor
+      - source_labels: [__meta_kubernetes_pod_container_port_number]
+        action: keep
+        regex: '4040'
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: instance
+    
+    # Redis metrics
+    - job_name: 'redis'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - payment-processing
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: redis
+      - source_labels: [__meta_kubernetes_pod_container_port_number]
+        action: keep
+        regex: '9121'
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: monitoring
+data:
+  fraud-detection-rules.yml: |
+    groups:
+    - name: fraud_detection_alerts
+      interval: 30s
+      rules:
+      # Alert on high consumer lag
+      - alert: HighKafkaConsumerLag
+        expr: kafka_consumer_lag_seconds > 120
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Kafka Consumer Lag"
+          description: "Kafka consumer lag is {{ $value }} seconds (threshold: 120s)"
+      
+      # Alert on processing backlog
+      - alert: ProcessingBacklog
+        expr: spark_streaming_input_rate_total > spark_streaming_output_rate_total
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Processing Backlog Detected"
+          description: "Input rate ({{ $value }}) exceeds output rate"
+      
+      # Alert on fraud detection failures
+      - alert: HighFraudAlertLag
+        expr: redis_memory_used_bytes > 1073741824  # > 1GB
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Redis Memory Usage"
+          description: "Redis memory usage is {{ $value }} bytes"
+      
+      # Alert on Spark executor failures
+      - alert: SparkExecutorFailures
+        expr: increase(spark_executor_failures_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Spark Executor Failures"
+          description: "{{ $value }} executor failures detected"
+      
+      # Alert on checkpoint failures
+      - alert: CheckpointFailures
+        expr: increase(spark_checkpoint_errors_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Spark Checkpoint Failures"
+          description: "Checkpoint failures may cause data loss"
+      
+      # Alert on velocity fraud detection degradation
+      - alert: VelocityFraudDetectionLag
+        expr: spark_streaming_batchDuration_ms > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Fraud Detection Processing Lag"
+          description: "Batch processing time is {{ $value }}ms (target: < 5s)"
+  
+  payment_processing_metrics.yml: |
+    groups:
+    - name: payment_processing_metrics
+      interval: 30s
+      rules:
+      # Record throughput metrics
+      - record: :spark:throughput:rate1m
+        expr: rate(spark_streaming_processed_records_total[1m])
+      
+      - record: :spark:throughput:rate5m
+        expr: rate(spark_streaming_processed_records_total[5m])
+      
+      - record: :spark:throughput:rate15m
+        expr: rate(spark_streaming_processed_records_total[15m])
+      
+      # Record latency percentiles
+      - record: :kafka:consumer_lag:p50
+        expr: histogram_quantile(0.50, kafka_consumer_lag_seconds)
+      
+      - record: :kafka:consumer_lag:p95
+        expr: histogram_quantile(0.95, kafka_consumer_lag_seconds)
+      
+      - record: :kafka:consumer_lag:p99
+        expr: histogram_quantile(0.99, kafka_consumer_lag_seconds)
+      
+      # Record deduplication effectiveness
+      - record: :dedup:effectiveness:rate
+        expr: (spark_duplication_prevented_total / spark_total_processed_total) * 100
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: payment-processing-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - name: payment-processing.rules
+    interval: 30s
+    rules:
+    - alert: PaymentProcessingDown
+      expr: up{job="spark-processor"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Payment Processing Pipeline Down"
+        description: "Spark payment processor is not responding"
+    
+    - alert: TransactionLossRisk
+      expr: spark_streaming_batchDuration_ms > 5000
+      for: 10m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Transaction Loss Risk"
+        description: "Batch processing exceeds 5s threshold"
+    
+    - alert: FraudDetectionDegraded
+      expr: increase(fraud_velocity_alerts_total[5m]) < 1
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Fraud Detection Degraded"
+        description: "No velocity fraud alerts in last 15 minutes"

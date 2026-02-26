@@ -1,0 +1,282 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+      slack_api_url: '${SLACK_WEBHOOK_URL}'
+
+    route:
+      receiver: 'payment-team'
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 24h
+      routes:
+      - receiver: 'critical'
+        match:
+          severity: critical
+        repeat_interval: 1h
+      - receiver: 'fraud-team'
+        match:
+          alert_type: fraud
+        repeat_interval: 15m
+      - receiver: 'ops-team'
+        match:
+          severity: warning
+        repeat_interval: 4h
+
+    receivers:
+    - name: 'payment-team'
+      slack_configs:
+      - channel: '#payment-alerts'
+        title: 'Payment Processing Alert'
+        text: '{{ .GroupLabels.alertname }} - {{ .CommonAnnotations.summary }}'
+        send_resolved: true
+
+    - name: 'critical'
+      slack_configs:
+      - channel: '#critical-alerts'
+        title: 'CRITICAL: {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+      pagerduty_configs:
+      - service_key: '${PAGERDUTY_SERVICE_KEY}'
+
+    - name: 'fraud-team'
+      slack_configs:
+      - channel: '#fraud-detection'
+        title: 'Fraud Alert: {{ .GroupLabels.alertname }}'
+        text: '{{ .CommonAnnotations.description }}'
+
+    - name: 'ops-team'
+      slack_configs:
+      - channel: '#payment-ops'
+        title: 'Warning: {{ .GroupLabels.alertname }}'
+
+    inhibit_rules:
+    - source_match:
+        severity: 'critical'
+      target_match:
+        severity: 'warning'
+      equal: ['alertname', 'cluster']
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: payment-processing-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  groups:
+  - name: payment-processing
+    interval: 30s
+    rules:
+
+    # CRITICAL: Consumer Lag Critical
+    - alert: KafkaConsumerLagCritical
+      expr: kafka_consumer_lag_seconds > 300
+      for: 2m
+      labels:
+        severity: critical
+        alert_type: latency
+      annotations:
+        summary: "Kafka consumer lag is critical"
+        description: "Consumer lag is {{ $value }}s (threshold: 300s). Processing is severely backlogged."
+
+    # WARNING: Consumer Lag High
+    - alert: KafkaConsumerLagHigh
+      expr: kafka_consumer_lag_seconds > 120
+      for: 5m
+      labels:
+        severity: warning
+        alert_type: latency
+      annotations:
+        summary: "Kafka consumer lag is high"
+        description: "Consumer lag is {{ $value }}s (threshold: 120s). Consider scaling up."
+
+    # CRITICAL: Fraud Detection High
+    - alert: FraudDetectionRateHigh
+      expr: rate(fraud_velocity_alerts_total[5m]) > 100
+      for: 2m
+      labels:
+        severity: critical
+        alert_type: fraud
+      annotations:
+        summary: "Abnormally high fraud detection rate"
+        description: "{{ $value }} fraud alerts/sec. Investigate potential attack or data quality issue."
+
+    # CRITICAL: Spark Executor Failures
+    - alert: SparkExecutorFailures
+      expr: rate(spark_executor_failures_total[5m]) > 5
+      for: 2m
+      labels:
+        severity: critical
+        alert_type: processing
+      annotations:
+        summary: "Spark executor failures detected"
+        description: "{{ $value }} executor failures/sec. Check resource availability."
+
+    # WARNING: Processing Backlog
+    - alert: ProcessingBacklog
+      expr: spark_streaming_unprocessed_records > 100000
+      for: 5m
+      labels:
+        severity: warning
+        alert_type: latency
+      annotations:
+        summary: "Processing backlog building up"
+        description: "{{ $value }} unprocessed records. Scale up Spark workers or reduce batch size."
+
+    # WARNING: Low Throughput
+    - alert: LowThroughput
+      expr: rate(spark_streaming_processed_records_total[5m]) < 5000
+      for: 10m
+      labels:
+        severity: warning
+        alert_type: performance
+      annotations:
+        summary: "Low message throughput detected"
+        description: "Throughput is {{ $value }} msgs/sec (expected >5K). Check Kafka and Spark health."
+
+    # CRITICAL: Redis Memory High
+    - alert: RedisMemoryHigh
+      expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+      for: 2m
+      labels:
+        severity: critical
+        alert_type: resource
+      annotations:
+        summary: "Redis memory usage critical"
+        description: "Memory usage is {{ $value | humanizePercentage }}. Fraud alerts cache may be full."
+
+    # WARNING: Pod CPU Throttling
+    - alert: PodCPUThrottling
+      expr: rate(container_cpu_cfs_throttled_seconds_total[5m]) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+        alert_type: resource
+      annotations:
+        summary: "Pod CPU throttling detected"
+        description: "{{ $labels.pod }} being throttled. Consider increasing CPU requests."
+
+    # WARNING: HPA at Max Replicas
+    - alert: HPAAtMaxReplicas
+      expr: karpenter_nodes_allocatable{resource_type="cpu"} == 0
+      for: 2m
+      labels:
+        severity: warning
+        alert_type: scaling
+      annotations:
+        summary: "HPA at maximum replicas"
+        description: "Spark processor HPA has reached max replicas (20). Upgrade cluster capacity."
+
+    # INFO: Deduplication Effectiveness Low
+    - alert: DeduplicationEffectivenessLow
+      expr: spark_deduplication_effectiveness < 0.85
+      for: 10m
+      labels:
+        severity: info
+        alert_type: quality
+      annotations:
+        summary: "Deduplication effectiveness below target"
+        description: "Dedup effectiveness: {{ $value | humanizePercentage }} (target: >85%)"
+
+    # Recording Rules (aggregations)
+  - name: spark-recordings
+    interval: 15s
+    rules:
+    - record: job:spark_streaming_processed:rate1m
+      expr: rate(spark_streaming_processed_records_total[1m])
+    - record: job:spark_streaming_processed:rate5m
+      expr: rate(spark_streaming_processed_records_total[5m])
+    - record: job:spark_streaming_processed:rate15m
+      expr: rate(spark_streaming_processed_records_total[15m])
+    - record: job:spark_batch_duration:p95
+      expr: histogram_quantile(0.95, rate(spark_streaming_batchDuration_ms_bucket[5m]))
+    - record: job:spark_batch_duration:p99
+      expr: histogram_quantile(0.99, rate(spark_streaming_batchDuration_ms_bucket[5m]))
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  selector:
+    app: alertmanager
+  type: ClusterIP
+  ports:
+  - name: web
+    port: 9093
+    targetPort: 9093
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - alertmanager
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: alertmanager
+        image: prom/alertmanager:latest
+        ports:
+        - containerPort: 9093
+        volumeMounts:
+        - name: config
+          mountPath: /etc/alertmanager
+        - name: storage
+          mountPath: /alertmanager
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: 9093
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: 9093
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: alertmanager-config
+      - name: storage
+        emptyDir: {}
