@@ -1,0 +1,196 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      scrape_timeout: 10s
+      evaluation_interval: 15s
+
+    alerting:
+      alertmanagers:
+      - static_configs:
+        - targets:
+          - alertmanager:9093
+
+    scrape_configs:
+    - job_name: 'kubernetes-apiservers'
+      kubernetes_sd_configs:
+      - role: endpoints
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: default;kubernetes;https
+
+    - job_name: 'spark-streaming'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - payment-pipeline
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: spark-processor
+      - source_labels: [__meta_kubernetes_pod_ip]
+        action: replace
+        target_label: __address__
+        replacement: $1:4040
+
+    - job_name: 'kafka-exporter'
+      static_configs:
+      - targets: ['kafka-exporter:9308']
+
+    - job_name: 'redis-exporter'
+      static_configs:
+      - targets: ['redis-exporter:9121']
+
+    - job_name: 'node-exporter'
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_endpoints_name]
+        action: keep
+        regex: node-exporter
+
+    - job_name: 'kubelet'
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      kubernetes_sd_configs:
+      - role: node
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: spark-streaming-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  groups:
+  - name: spark-streaming
+    interval: 30s
+    rules:
+
+    - alert: KafkaConsumerLagCritical
+      expr: kafka_consumer_lag_seconds > 300
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Kafka consumer lag is critical"
+        description: "Consumer lag is {{ $value }}s (threshold: 300s)"
+
+    - alert: KafkaConsumerLagHigh
+      expr: kafka_consumer_lag_seconds > 120
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Kafka consumer lag is high"
+        description: "Consumer lag is {{ $value }}s (threshold: 120s)"
+
+    - alert: FraudDetectionRateHigh
+      expr: rate(fraud_velocity_alerts_total[5m]) > 100
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Abnormally high fraud detection rate"
+        description: "{{ $value }} fraud alerts/sec"
+
+    - alert: SparkExecutorFailures
+      expr: rate(spark_executor_failures_total[5m]) > 5
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Spark executor failures detected"
+        description: "{{ $value }} executor failures/sec"
+
+    - alert: ProcessingBacklog
+      expr: spark_streaming_unprocessed_records > 100000
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Processing backlog building up"
+        description: "{{ $value }} unprocessed records"
+
+    - alert: LowThroughput
+      expr: rate(spark_streaming_processed_records_total[5m]) < 5000
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Low message throughput detected"
+        description: "Throughput is {{ $value }} msgs/sec"
+
+    - alert: RedisMemoryHigh
+      expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Redis memory usage critical"
+        description: "Memory usage is {{ $value | humanizePercentage }}"
+
+    - alert: PodCPUThrottling
+      expr: rate(container_cpu_cfs_throttled_seconds_total[5m]) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Pod CPU throttling detected"
+        description: "{{ $labels.pod }} being throttled"
+
+    - alert: HPAAtMaxReplicas
+      expr: karpenter_nodes_allocatable{resource_type="cpu"} == 0
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "HPA at maximum replicas"
+        description: "Spark processor HPA has reached max replicas"
+
+    - alert: DeduplicationEffectivenessLow
+      expr: spark_deduplication_effectiveness < 0.85
+      for: 10m
+      labels:
+        severity: info
+      annotations:
+        summary: "Deduplication effectiveness below target"
+        description: "Dedup effectiveness: {{ $value | humanizePercentage }}"
+
+  - name: spark-recordings
+    interval: 15s
+    rules:
+    - record: job:spark_streaming_processed:rate1m
+      expr: rate(spark_streaming_processed_records_total[1m])
+    - record: job:spark_streaming_processed:rate5m
+      expr: rate(spark_streaming_processed_records_total[5m])
+    - record: job:spark_streaming_processed:rate15m
+      expr: rate(spark_streaming_processed_records_total[15m])
+    - record: job:spark_batch_duration:p95
+      expr: histogram_quantile(0.95, rate(spark_streaming_batchDuration_ms_bucket[5m]))
+    - record: job:spark_batch_duration:p99
+      expr: histogram_quantile(0.99, rate(spark_streaming_batchDuration_ms_bucket[5m]))

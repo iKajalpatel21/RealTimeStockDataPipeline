@@ -1,0 +1,181 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-config
+  namespace: monitoring
+data:
+  payment-processing-dashboard.json: |
+    {
+      "dashboard": {
+        "title": "Real-Time Payment Processing Pipeline",
+        "description": "Production monitoring for payment processing with fraud detection",
+        "tags": ["payment", "spark", "kafka", "fraud", "realtime"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "title": "Messages Per Second",
+            "targets": [{"expr": "rate(spark_streaming_processed_records_total[5m])"}],
+            "type": "graph"
+          },
+          {
+            "title": "Kafka Consumer Lag",
+            "targets": [{"expr": "kafka_consumer_lag_seconds"}],
+            "type": "graph"
+          },
+          {
+            "title": "Spark Batch Duration (p95)",
+            "targets": [{"expr": "histogram_quantile(0.95, rate(spark_streaming_batchDuration_ms_bucket[5m]))"}],
+            "type": "graph"
+          },
+          {
+            "title": "Fraud Alerts Per Second",
+            "targets": [{"expr": "rate(fraud_velocity_alerts_total[5m])"}],
+            "type": "stat"
+          },
+          {
+            "title": "Active Fraud Accounts",
+            "targets": [{"expr": "redis_fraud_accounts_count"}],
+            "type": "stat"
+          },
+          {
+            "title": "Redis Memory Usage",
+            "targets": [{"expr": "redis_memory_used_bytes / redis_memory_max_bytes"}],
+            "type": "gauge"
+          },
+          {
+            "title": "Deduplication Effectiveness",
+            "targets": [{"expr": "spark_deduplication_effectiveness"}],
+            "type": "gauge"
+          },
+          {
+            "title": "Pod CPU Usage",
+            "targets": [{"expr": "rate(container_cpu_usage_seconds_total[5m])"}],
+            "type": "graph"
+          },
+          {
+            "title": "Pod Memory Usage",
+            "targets": [{"expr": "container_memory_usage_bytes"}],
+            "type": "graph"
+          },
+          {
+            "title": "HPA Replica Count",
+            "targets": [{"expr": "karpenter_nodes_allocatable"}],
+            "type": "stat"
+          },
+          {
+            "title": "BigQuery Write Latency (p95)",
+            "targets": [{"expr": "histogram_quantile(0.95, rate(bigquery_write_latency_ms_bucket[5m]))"}],
+            "type": "graph"
+          },
+          {
+            "title": "Executor Failures",
+            "targets": [{"expr": "rate(spark_executor_failures_total[5m])"}],
+            "type": "stat"
+          },
+          {
+            "title": "Processing Backlog",
+            "targets": [{"expr": "spark_streaming_unprocessed_records"}],
+            "type": "stat"
+          },
+          {
+            "title": "System Health Status",
+            "targets": [{"expr": "up"}],
+            "type": "table"
+          }
+        ]
+      }
+    }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 3000
+    protocol: TCP
+  selector:
+    app: grafana
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - grafana
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: grafana
+        image: grafana/grafana:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: GF_SECURITY_ADMIN_USER
+          value: admin
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana-admin-secret
+              key: password
+        - name: GF_INSTALL_PLUGINS
+          value: "grafana-piechart-panel"
+        volumeMounts:
+        - name: storage
+          mountPath: /var/lib/grafana
+        - name: datasources
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: dashboards
+          mountPath: /etc/grafana/provisioning/dashboards
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: storage
+        emptyDir: {}
+      - name: datasources
+        configMap:
+          name: grafana-datasources
+      - name: dashboards
+        configMap:
+          name: grafana-dashboard-config

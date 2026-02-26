@@ -1,0 +1,134 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+data:
+  prometheus-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      url: http://prometheus:9090
+      access: proxy
+      isDefault: true
+      editable: true
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-admin-secret
+  namespace: monitoring
+type: Opaque
+stringData:
+  password: "PaymentProcessing@2026"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-deployment-config
+  namespace: monitoring
+data:
+  prometheus-values.yaml: |
+    prometheus:
+      prometheusSpec:
+        retention: 30d
+        walCompression: true
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            cpu: 2
+            memory: 4Gi
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 50Gi
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: payment-processing-prometheus
+  namespace: monitoring
+spec:
+  serviceAccountName: prometheus
+  retention: 30d
+  walCompression: true
+  storageSpec:
+    volumeClaimTemplate:
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 50Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  ruleSelector:
+    matchLabels:
+      release: prometheus
+  serviceMonitorSelector:
+    matchLabels:
+      release: prometheus
+  additionalScrapeConfigs:
+  - job_name: 'spark-metrics'
+    metrics_path: '/metrics'
+    static_configs:
+    - targets: ['spark-processor:4040']
+  - job_name: 'redis-metrics'
+    static_configs:
+    - targets: ['redis-exporter:9121']
+  - job_name: 'kafka-metrics'
+    static_configs:
+    - targets: ['kafka-exporter:9308']
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+- apiGroups: [""]
+  resources:
+  - nodes
+  - nodes/proxy
+  - services
+  - endpoints
+  - pods
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["extensions"]
+  resources:
+  - ingresses
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+- kind: ServiceAccount
+  name: prometheus
+  namespace: monitoring
