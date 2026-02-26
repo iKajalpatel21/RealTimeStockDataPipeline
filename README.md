@@ -2,7 +2,7 @@
 
 A **production-grade, enterprise-ready** real-time payment fraud detection system built with **Apache Spark Streaming**, **Kafka**, **Google BigQuery**, **Redis**, and **Kubernetes**. Engineered for PayPal-scale systems with exactly-once semantics, PCI-DSS compliance, and sub-200ms fraud decisioning.
 
-## 🎯 What is ScaleGuard?
+## What is ScaleGuard?
 
 **ScaleGuard** is a high-throughput, low-latency payment fraud detection pipeline that:
 - ✅ Processes **10K+ transactions per second** with **exactly-once semantics**
@@ -15,7 +15,7 @@ A **production-grade, enterprise-ready** real-time payment fraud detection syste
 - ✅ Handles **late-arriving data** (watermarks for out-of-order payment events)
 - ✅ Prevents **double-spending** (transaction ID deduplication with exactly-once sink)
 
-## 🏗️ System Architecture
+## System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -54,7 +54,7 @@ A **production-grade, enterprise-ready** real-time payment fraud detection syste
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-## � Performance & Metrics: Before vs After Optimization
+## Performance & Metrics: Before vs After Optimization
 
 These metrics validate that our engineering claims are backed by **measured results**, not assumptions.
 
@@ -111,7 +111,7 @@ These metrics validate that our engineering claims are backed by **measured resu
 
 ---
 
-## �📋 Core Features (PayPal-Grade Implementation)
+## Core Features (PayPal-Grade Implementation)
 
 ### 1. **Exactly-Once Semantics (No Double-Spending)**
 ```python
@@ -200,7 +200,7 @@ AlertManager Routes:
 └─ Audit (Dedup hits) → Slack #compliance-audit
 ```
 
-## 📊 Prerequisites
+## Prerequisites
 
 ### Local Development
 - Docker & Docker Compose
@@ -215,7 +215,7 @@ AlertManager Routes:
 - Google Cloud Storage bucket (for Spark checkpoints)
 - Service account with BigQuery/GCS permissions
 
-## 🚀 Quick Start (Local Development)
+## Quick Start (Local Development)
 
 ### 1. Clone & Setup
 
@@ -293,7 +293,7 @@ done
 # Should show 1 fraud alert (3+ txns in 60 seconds)
 ```
 
-## ☸️ Kubernetes Deployment (Production)
+## Kubernetes Deployment (Production)
 
 ### Prerequisites
 ```bash
@@ -374,7 +374,7 @@ kubectl port-forward svc/alertmanager 9093:9093 -n monitoring
 # URL: http://localhost:9093
 ```
 
-## 📊 Monitoring & Dashboards
+## Monitoring & Dashboards
 
 ### Grafana Dashboard Overview
 
@@ -460,7 +460,7 @@ kubectl create secret generic alertmanager-slack \
 kubectl edit configmap alertmanager-config -n monitoring
 ```
 
-## 🎯 Key Features
+## Key Features
 
 ### 1. Fraud Detection (Real-Time)
 
@@ -595,7 +595,7 @@ CREATE TABLE payment_dataset.fraud_velocity_alerts (
 | **Double-Spend Prevention** | 100% | 99.98% | ✅ |
 | **PII Masking Coverage** | 100% | 100% | ✅ |
 
-## 🛠️ Troubleshooting
+## Troubleshooting
 
 ### Consumer Lag Growing (Fraud Detection Falling Behind)
 
@@ -737,7 +737,7 @@ ScaleGuard/
 └── README.md                     # This file
 ```
 
-## ✅ Features Implemented
+## Features Implemented
 
 ### Core Fraud Detection
 - [x] Velocity-based fraud detection (3+ txns/60s)
@@ -763,7 +763,7 @@ ScaleGuard/
 - [x] Load testing automation
 - [x] Production deployment checklist
 
-## 🚀 Quick Deploy
+## Quick Deploy
 
 ```bash
 # Local development
@@ -773,7 +773,7 @@ docker-compose up -d && python data-collector/payment_simulator.py --rate 1000
 kubectl apply -f k8s/ && kubectl rollout status deployment/spark-processor -n payment-pipeline
 ```
 
-## 📖 Documentation
+## Documentation
 
 - **[docs/KUBERNETES_DEPLOYMENT.md](docs/KUBERNETES_DEPLOYMENT.md)** - Production deployment guide (700+ lines)
 - **[docs/FRAUD_ENGINEERING_SUMMARY.md](docs/FRAUD_ENGINEERING_SUMMARY.md)** - Fraud detection architecture
@@ -782,7 +782,7 @@ kubectl apply -f k8s/ && kubectl rollout status deployment/spark-processor -n pa
 - **[docs/PII_MASKING_COMPLIANCE.md](docs/PII_MASKING_COMPLIANCE.md)** - GDPR/PCI-DSS compliance
 - **[spark/payment_processor.py](spark/payment_processor.py)** - Core processor (764 lines, fully commented)
 
-## 🔐 Security
+## Security
 
 - ✅ **PII Masking:** Credit cards (XXXX-****-****-9012), SHA-256 hashing
 - ✅ **Encryption:** BigQuery at-rest, Kafka in-transit
@@ -790,7 +790,7 @@ kubectl apply -f k8s/ && kubectl rollout status deployment/spark-processor -n pa
 - ✅ **Audit Trail:** Compliance audit log (immutable)
 - ✅ **Secrets:** GCP Secret Manager integration
 
-## 📊 Use Cases
+## Use Cases
 
 1. **Real-Time Payment Protection** - Flag fraudulent transactions <200ms
 2. **Velocity Fraud Detection** - Catch credit card testing (rapid low-value txns)
@@ -798,7 +798,7 @@ kubectl apply -f k8s/ && kubectl rollout status deployment/spark-processor -n pa
 4. **Regulatory Compliance** - GDPR/PCI-DSS audit trail
 5. **Operational Insights** - Dashboard for fraud team (Grafana)
 
-## 🏆 Resume Bullet Points
+## Resume Bullet Points
 
 - Engineered a **high-throughput payment fraud pipeline** processing **10K+ TPS** using Apache Spark and Kafka
 - Implemented **exactly-once semantics** with idempotent Kafka producers and transaction deduplication, preventing double-spending
@@ -808,7 +808,7 @@ kubectl apply -f k8s/ && kubectl rollout status deployment/spark-processor -n pa
 - Developed **comprehensive monitoring** (Prometheus + Grafana with 14 real-time dashboards)
 - Implemented **AlertManager routing** to Slack/PagerDuty for critical fraud events
 
-## 📞 Support
+## Support
 
 See [docs/KUBERNETES_DEPLOYMENT.md - Troubleshooting](docs/KUBERNETES_DEPLOYMENT.md#troubleshooting) for detailed help.
 
