@@ -1,86 +1,209 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: grafana-dashboard-config
+  name: grafana-dashboard-payment-processing
   namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
 data:
   payment-processing-dashboard.json: |
     {
       "dashboard": {
         "title": "Real-Time Payment Processing Pipeline",
-        "description": "Production monitoring for payment processing with fraud detection",
-        "tags": ["payment", "spark", "kafka", "fraud", "realtime"],
+        "tags": ["payment-processing", "fraud-detection", "kafka"],
         "timezone": "browser",
         "panels": [
           {
-            "title": "Messages Per Second",
-            "targets": [{"expr": "rate(spark_streaming_processed_records_total[5m])"}],
-            "type": "graph"
+            "title": "Messages Per Second (Throughput)",
+            "targets": [
+              {
+                "expr": "rate(spark_streaming_processed_records_total[1m])",
+                "legendFormat": "Throughput (msgs/sec)"
+              }
+            ],
+            "type": "graph",
+            "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+            "fieldConfig": {
+              "defaults": {
+                "unit": "ops",
+                "custom": {"hideFrom": {"tooltip": false, "viz": false, "legend": false}}
+              }
+            }
           },
           {
             "title": "Kafka Consumer Lag",
-            "targets": [{"expr": "kafka_consumer_lag_seconds"}],
-            "type": "graph"
+            "targets": [
+              {
+                "expr": "kafka_consumer_lag_seconds",
+                "legendFormat": "Consumer Lag (seconds)"
+              }
+            ],
+            "type": "graph",
+            "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+            "alert": {
+              "conditions": [
+                {
+                  "evaluator": {"params": [120], "type": "gt"},
+                  "operator": {"type": "and"},
+                  "query": {"params": ["A", "5m", "now"]},
+                  "reducer": {"params": [], "type": "avg"},
+                  "type": "query"
+                }
+              ],
+              "message": "Consumer lag exceeds threshold"
+            }
           },
           {
-            "title": "Spark Batch Duration (p95)",
-            "targets": [{"expr": "histogram_quantile(0.95, rate(spark_streaming_batchDuration_ms_bucket[5m]))"}],
-            "type": "graph"
+            "title": "Spark Batch Duration",
+            "targets": [
+              {
+                "expr": "spark_streaming_batchDuration_ms",
+                "legendFormat": "Batch Duration (ms)"
+              }
+            ],
+            "type": "graph",
+            "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+            "thresholds": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 2000},
+              {"color": "red", "value": 5000}
+            ]
           },
           {
-            "title": "Fraud Alerts Per Second",
-            "targets": [{"expr": "rate(fraud_velocity_alerts_total[5m])"}],
-            "type": "stat"
-          },
-          {
-            "title": "Active Fraud Accounts",
-            "targets": [{"expr": "redis_fraud_accounts_count"}],
-            "type": "stat"
+            "title": "Fraud Alerts (Velocity Detected)",
+            "targets": [
+              {
+                "expr": "increase(fraud_velocity_alerts_total[1m])",
+                "legendFormat": "Alerts/Min"
+              }
+            ],
+            "type": "stat",
+            "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+            "colorMode": "background",
+            "graphMode": "area"
           },
           {
             "title": "Redis Memory Usage",
-            "targets": [{"expr": "redis_memory_used_bytes / redis_memory_max_bytes"}],
-            "type": "gauge"
+            "targets": [
+              {
+                "expr": "redis_memory_used_bytes / 1024 / 1024",
+                "legendFormat": "Memory (MB)"
+              }
+            ],
+            "type": "gauge",
+            "gridPos": {"x": 0, "y": 16, "w": 6, "h": 6},
+            "fieldConfig": {
+              "defaults": {
+                "unit": "decmbytes",
+                "max": 1024
+              }
+            }
+          },
+          {
+            "title": "Active Fraud Accounts (Redis)",
+            "targets": [
+              {
+                "expr": "redis_cmd_count{cmd='SCARD'}",
+                "legendFormat": "Active Accounts"
+              }
+            ],
+            "type": "stat",
+            "gridPos": {"x": 6, "y": 16, "w": 6, "h": 6},
+            "colorMode": "background"
           },
           {
             "title": "Deduplication Effectiveness",
-            "targets": [{"expr": "spark_deduplication_effectiveness"}],
-            "type": "gauge"
+            "targets": [
+              {
+                "expr": "(spark_duplication_prevented_total / spark_total_processed_total) * 100",
+                "legendFormat": "Dedup Rate (%)"
+              }
+            ],
+            "type": "gauge",
+            "gridPos": {"x": 12, "y": 16, "w": 6, "h": 6},
+            "fieldConfig": {
+              "defaults": {
+                "unit": "percent",
+                "max": 100
+              }
+            }
+          },
+          {
+            "title": "Spark Executor Status",
+            "targets": [
+              {
+                "expr": "spark_executor_count",
+                "legendFormat": "Executors"
+              }
+            ],
+            "type": "stat",
+            "gridPos": {"x": 18, "y": 16, "w": 6, "h": 6}
           },
           {
             "title": "Pod CPU Usage",
-            "targets": [{"expr": "rate(container_cpu_usage_seconds_total[5m])"}],
-            "type": "graph"
+            "targets": [
+              {
+                "expr": "rate(container_cpu_usage_seconds_total{pod=~'spark-processor.*'}[5m])",
+                "legendFormat": "{{ pod }}"
+              }
+            ],
+            "type": "graph",
+            "gridPos": {"x": 0, "y": 22, "w": 12, "h": 8}
           },
           {
             "title": "Pod Memory Usage",
-            "targets": [{"expr": "container_memory_usage_bytes"}],
-            "type": "graph"
+            "targets": [
+              {
+                "expr": "container_memory_usage_bytes{pod=~'spark-processor.*'} / 1024 / 1024",
+                "legendFormat": "{{ pod }}"
+              }
+            ],
+            "type": "graph",
+            "gridPos": {"x": 12, "y": 22, "w": 12, "h": 8}
           },
           {
-            "title": "HPA Replica Count",
-            "targets": [{"expr": "karpenter_nodes_allocatable"}],
-            "type": "stat"
+            "title": "HPA Status - Pod Replicas",
+            "targets": [
+              {
+                "expr": "kube_deployment_status_replicas{deployment='spark-processor'}",
+                "legendFormat": "Current Replicas"
+              }
+            ],
+            "type": "stat",
+            "gridPos": {"x": 0, "y": 30, "w": 6, "h": 6}
           },
           {
-            "title": "BigQuery Write Latency (p95)",
-            "targets": [{"expr": "histogram_quantile(0.95, rate(bigquery_write_latency_ms_bucket[5m]))"}],
-            "type": "graph"
+            "title": "HPA Desired Replicas",
+            "targets": [
+              {
+                "expr": "kube_deployment_spec_replicas{deployment='spark-processor'}",
+                "legendFormat": "Desired Replicas"
+              }
+            ],
+            "type": "stat",
+            "gridPos": {"x": 6, "y": 30, "w": 6, "h": 6}
           },
           {
-            "title": "Executor Failures",
-            "targets": [{"expr": "rate(spark_executor_failures_total[5m])"}],
-            "type": "stat"
+            "title": "BigQuery Write Latency",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(bigquery_write_latency_ms_bucket[5m]))",
+                "legendFormat": "P95 Latency"
+              }
+            ],
+            "type": "graph",
+            "gridPos": {"x": 12, "y": 30, "w": 12, "h": 6}
           },
           {
-            "title": "Processing Backlog",
-            "targets": [{"expr": "spark_streaming_unprocessed_records"}],
-            "type": "stat"
-          },
-          {
-            "title": "System Health Status",
-            "targets": [{"expr": "up"}],
-            "type": "table"
+            "title": "System Status",
+            "targets": [
+              {
+                "expr": "up{job=~'spark-processor|kafka|redis|prometheus'}",
+                "legendFormat": "{{ job }}"
+              }
+            ],
+            "type": "table",
+            "gridPos": {"x": 0, "y": 36, "w": 24, "h": 6}
           }
         ]
       }
@@ -95,9 +218,9 @@ metadata:
 spec:
   type: LoadBalancer
   ports:
-  - port: 80
+  - name: grafana
+    port: 3000
     targetPort: 3000
-    protocol: TCP
   selector:
     app: grafana
 
@@ -108,7 +231,7 @@ metadata:
   name: grafana
   namespace: monitoring
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: grafana
@@ -117,39 +240,26 @@ spec:
       labels:
         app: grafana
     spec:
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app
-                  operator: In
-                  values:
-                  - grafana
-              topologyKey: kubernetes.io/hostname
       containers:
       - name: grafana
         image: grafana/grafana:latest
         ports:
         - containerPort: 3000
+          name: grafana
         env:
-        - name: GF_SECURITY_ADMIN_USER
-          value: admin
         - name: GF_SECURITY_ADMIN_PASSWORD
           valueFrom:
             secretKeyRef:
               name: grafana-admin-secret
               key: password
+        - name: GF_USERS_ALLOW_SIGN_UP
+          value: "false"
         - name: GF_INSTALL_PLUGINS
-          value: "grafana-piechart-panel"
+          value: "grafana-piechart-panel,grafana-worldmap-panel"
         volumeMounts:
-        - name: storage
-          mountPath: /var/lib/grafana
-        - name: datasources
+        - name: grafana-datasources
           mountPath: /etc/grafana/provisioning/datasources
-        - name: dashboards
+        - name: grafana-dashboards
           mountPath: /etc/grafana/provisioning/dashboards
         resources:
           requests:
@@ -162,20 +272,18 @@ spec:
           httpGet:
             path: /api/health
             port: 3000
-          initialDelaySeconds: 30
-          periodSeconds: 30
+          initialDelaySeconds: 10
+          periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /api/health
             port: 3000
-          initialDelaySeconds: 10
-          periodSeconds: 10
+          initialDelaySeconds: 5
+          periodSeconds: 5
       volumes:
-      - name: storage
-        emptyDir: {}
-      - name: datasources
+      - name: grafana-datasources
         configMap:
           name: grafana-datasources
-      - name: dashboards
+      - name: grafana-dashboards
         configMap:
-          name: grafana-dashboard-config
+          name: grafana-dashboard-payment-processing

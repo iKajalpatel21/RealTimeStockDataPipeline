@@ -50,6 +50,17 @@ data:
               resources:
                 requests:
                   storage: 50Gi
+        additionalScrapeConfigs:
+        - job_name: 'karpenter'
+          kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+              - karpenter
+          relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            action: keep
+            regex: 'http-metrics'
 
 ---
 apiVersion: monitoring.coreos.com/v1

@@ -15,7 +15,7 @@ WORKDIR /app
 COPY . .
 
 # Make the script executable
-RUN chmod +x /app/stock_processor.py
+RUN chmod +x /app/payment_processor.py
 
-# Run the processor
-CMD ["/app/stock_processor.py"]
+# Run the payment event processor with exactly-once semantics
+CMD ["/app/payment_processor.py"]

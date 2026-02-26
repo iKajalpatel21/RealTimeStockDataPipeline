@@ -44,6 +44,12 @@ get_metrics() {
   
   echo "📈 Current Metrics:"
   echo "   Spark Replicas: ${SPARK_REPLICAS}/${SPARK_DESIRED}"
+  
+  # Try to get metrics from Prometheus (if available)
+  if kubectl get svc prometheus-kube-prom-prometheus -n monitoring &>/dev/null; then
+    echo "   (Prometheus available - check Grafana for detailed metrics)"
+  fi
+  
   echo ""
 }
 
