@@ -18,6 +18,43 @@ This project implements a complete data pipeline for processing real-time stock 
 - `/k8s`: Kubernetes manifests for deployment
 - `/.github`: GitHub Actions workflows for CI/CD
 
+## Architecture
+
+```
+Ingest Stage:
+- Finnhub API (WebSocket + REST) → Data collector (finnhub_collector.py)
+
+Stream Stage:
+- Data collector publishes to Kafka topics:
+  - stock-trades
+  - stock-quotes
+
+Process Stage:
+- Apache Spark Streaming jobs consume from Kafka
+- Enrichment and aggregation of data
+
+Storage & Visualization:
+- Google BigQuery: Data warehouse for querying
+- Tableau: Business intelligence dashboards
+- Next.js: Modern web UI for real-time visualization
+
+Deployment:
+- Docker containers for each service
+- Kubernetes orchestration for production
+- GitHub Actions CI/CD pipeline
+- Local development: docker-compose
+- Production: deploy.sh and k8s manifests
+```
+
+**Data Flow:**
+1. Finnhub API provides real-time stock data (trades and quotes)
+2. Data Collector subscribes via WebSocket/REST and publishes to Kafka
+3. Kafka streams data to Spark jobs
+4. Spark enriches and aggregates the data
+5. Processed data is stored in BigQuery
+6. Tableau and Next.js consume data for visualization
+7. All services are containerized with Docker and orchestrated by Kubernetes for production
+
 ## Setup Instructions
 
 1. Set up environment variables in `.env` file
